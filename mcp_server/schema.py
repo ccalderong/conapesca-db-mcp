@@ -4,8 +4,6 @@ from __future__ import annotations
 from mcp_server.db import execute_raw, execute_select
 from mcp_server.config import USE_SQLITE
 
-_schema_cache: dict | None = None
-
 
 def describe_table() -> list[dict]:
     if USE_SQLITE:
@@ -32,11 +30,9 @@ def get_coverage() -> dict:
 
 
 def build_schema_snapshot() -> dict:
-    global _schema_cache
-    if _schema_cache is not None:
-        return _schema_cache
+    """Always queries the live DB — no cache, so reloads are reflected immediately."""
     coverage = get_coverage()
-    _schema_cache = {
+    return {
         "table": "conapesca_landings_historical",
         "columns": describe_table(),
         "row_count": get_row_count(),
@@ -45,4 +41,3 @@ def build_schema_snapshot() -> dict:
         "unique_estados": coverage.get("unique_estados"),
         "unique_fleet_types": coverage.get("unique_fleet_types"),
     }
-    return _schema_cache
