@@ -326,7 +326,7 @@ def register(mcp) -> None:
         safe_limit = min(max(1, limit), 2000)
         rows = execute_select(
             f"SELECT anio_corte, fecha_aviso, tipo_aviso, folio_aviso, "
-            f"nombre_estado, nombre_oficina, nombre_sitio_desembarque, "
+            f"litoral, nombre_estado, nombre_oficina, nombre_sitio_desembarque, "
             f"unidad_economica, nombre_especie, nombre_cientifico, "
             f"peso_desembarcado_kg, valor_pesos_estimado, tipo_pesca_canonico, "
             f"dias_efectivos, dias_efectivos_fuente, "
