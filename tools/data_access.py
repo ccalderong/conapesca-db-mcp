@@ -233,7 +233,7 @@ def register(mcp) -> None:
             conditions.append("tipo_aviso = ?")
             params.append(tipo_aviso.upper())
         if oficina:
-            conditions.append("nombre_oficina_canonico LIKE ?")
+            conditions.append("nombre_oficina LIKE ?")
             params.append(f"%{oficina.upper()}%")
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         p = tuple(params) or None
@@ -247,7 +247,7 @@ def register(mcp) -> None:
         if group_by == "folio":
             rows = execute_select(
                 f"SELECT folio_aviso, anio_corte, tipo_aviso, "
-                f"nombre_estado, nombre_oficina_canonico, "
+                f"nombre_estado, nombre_oficina, "
                 f"MAX(dias_efectivos) AS dias_efectivos, "
                 f"MAX(dias_efectivos_fuente) AS dias_efectivos_fuente, "
                 f"MAX(flag_fecha_generica) AS flag_fecha_generica, "
@@ -256,7 +256,7 @@ def register(mcp) -> None:
                 f"ROUND(SUM(peso_desembarcado_kg), 3) AS peso_desembarcado_kg "
                 f"FROM conapesca_landings_historical {where} "
                 f"GROUP BY folio_aviso, anio_corte, tipo_aviso, "
-                f"nombre_estado, nombre_oficina_canonico "
+                f"nombre_estado, nombre_oficina "
                 f"ORDER BY anio_corte, folio_aviso",
                 p,
             )
@@ -326,7 +326,7 @@ def register(mcp) -> None:
         safe_limit = min(max(1, limit), 2000)
         rows = execute_select(
             f"SELECT anio_corte, fecha_aviso, tipo_aviso, folio_aviso, "
-            f"nombre_estado, nombre_oficina_canonico, nombre_sitio_desembarque_canonico, "
+            f"nombre_estado, nombre_oficina, nombre_sitio_desembarque, "
             f"unidad_economica, nombre_especie, nombre_cientifico, "
             f"peso_desembarcado_kg, valor_pesos_estimado, tipo_pesca_canonico, "
             f"dias_efectivos, dias_efectivos_fuente, "
@@ -357,11 +357,11 @@ def register(mcp) -> None:
             params.append(estado.upper())
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         rows = execute_select(
-            f"SELECT nombre_oficina_canonico, nombre_estado, "
+            f"SELECT nombre_oficina, nombre_estado, "
             f"COUNT(*) AS n_records "
             f"FROM conapesca_landings_historical {where} "
-            f"GROUP BY nombre_oficina_canonico, nombre_estado "
-            f"ORDER BY nombre_estado, nombre_oficina_canonico",
+            f"GROUP BY nombre_oficina, nombre_estado "
+            f"ORDER BY nombre_estado, nombre_oficina",
             tuple(params) or None,
         )
         return _json({
@@ -379,7 +379,7 @@ def register(mcp) -> None:
             "SELECT DISTINCT nombre_especie, nombre_cientifico, "
             "kingdom, phylum, class, `order`, family, genus, worms_id, "
             "spec_code_fishbase, fishbase_database, "
-            "k, loo, lmax, tmax, wmax, trophic_level, tipo_pesca_canonico, manglar "
+            "k, loo, lmax, tmax, wmax, trophic_level, tipo_pesca_canonico "
             "FROM conapesca_landings_historical "
             "WHERE nombre_especie LIKE ? OR nombre_cientifico LIKE ? "
             "LIMIT 10",

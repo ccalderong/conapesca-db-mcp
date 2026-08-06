@@ -5,6 +5,7 @@ Auto-discovers tool modules from tools/.
 
 from __future__ import annotations
 import importlib
+import importlib.metadata
 import json
 import pkgutil
 import logging
@@ -19,6 +20,23 @@ mcp = FastMCP("CONAPESCA Landings")
 
 
 # ── Core tools (defined inline) ---------------------------------------------
+
+@mcp.tool()
+def get_version() -> str:
+    """Return the current version of the CONAPESCA MCP server and database coverage."""
+    try:
+        version = importlib.metadata.version("conapesca-db-mcp")
+    except importlib.metadata.PackageNotFoundError:
+        version = "unknown"
+    return json.dumps({
+        "server_version": version,
+        "database": "conapesca_landings_historical",
+        "coverage": {
+            "years": "2001–2026",
+            "litorales": ["PACIFICO", "GOLFO"],
+        },
+    })
+
 
 @mcp.tool()
 def health_check() -> str:
@@ -72,8 +90,8 @@ def data_dictionary() -> str:
 
 ## Geography
 - nombre_estado                    : Mexican state
-- clave_oficina / nombre_oficina_canonico : CONAPESCA office
-- clave_sitio_desembarque / nombre_sitio_desembarque_canonico : Landing site
+- clave_oficina / nombre_oficina : CONAPESCA office
+- clave_sitio_desembarque / nombre_sitio_desembarque : Landing site
 - nombre_lugar_captura             : Capture area
 
 ## Species
@@ -98,7 +116,6 @@ def data_dictionary() -> str:
                           else peso_desembarcado_kg × precio_pesos
 
 ## Enrichment flags
-- manglar            : Mangrove-associated species (SI/NO)
 - tipo_pesca_canonico: ARTESANAL / INDUSTRIAL / ALTURA
 """
 
