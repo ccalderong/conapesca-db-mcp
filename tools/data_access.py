@@ -53,11 +53,16 @@ def register(mcp) -> None:
         top_n: int | None = None,
     ) -> str:
         """
-        List species (nombre_especie + nombre_cientifico) with total landed
+        List species (nombre_especie + nombre_cientifico_canonico) with total landed
         weight (kg), estimated value (MXN) and record count.
         Filters: year, estado, tipo_aviso (MAYORES/MENORES/COSECHA).
         top_n: if provided, return only the top N species by landed weight
         (max 500); if omitted, return all matching combinations.
+
+        IMPORTANT: Always provide at least one filter (year, estado, or tipo_aviso).
+        Queries without any filter scan 12+ million rows and will likely time out.
+        If the user does not specify a year or state, ask them to provide one before
+        calling this tool.
         """
         conditions, params = [], []
         if year:
@@ -72,17 +77,17 @@ def register(mcp) -> None:
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         max_rows = min(max(1, top_n), 500) if top_n is not None else 5000
         rows = execute_select(
-            f"SELECT nombre_especie, nombre_cientifico, "
+            f"SELECT nombre_especie, nombre_cientifico_canonico, "
             f"ROUND(SUM(peso_desembarcado_kg), 1) AS total_kg, "
             f"ROUND(SUM(valor_pesos_estimado), 0) AS total_valor_mxn, "
             f"COUNT(*) AS n_records "
             f"FROM conapesca_landings_historical {where} "
-            f"GROUP BY nombre_especie, nombre_cientifico "
+            f"GROUP BY nombre_especie, nombre_cientifico_canonico "
             f"ORDER BY total_kg DESC",
             tuple(params) or None,
             max_rows=max_rows,
         )
-        result = [{**dict(r), "tipo": _tipo(r.get("nombre_cientifico"))} for r in rows]
+        result = [{**dict(r), "tipo": _tipo(r.get("nombre_cientifico_canonico"))} for r in rows]
         return _json({
             "species": result,
             "meta": {
@@ -107,16 +112,16 @@ def register(mcp) -> None:
         (nombre_cientifico = ND or empty) and how many records they represent.
         Use this tool to answer any question about species diversity or richness.
         """
-        # One row per unique nombre_cientifico with representative taxonomy
+        # One row per unique nombre_cientifico_canonico with representative taxonomy
         identified_rows = execute_select(
-            "SELECT nombre_cientifico, "
+            "SELECT nombre_cientifico_canonico, "
             "MAX(genus) AS genus, MAX(family) AS family, MAX(`order`) AS `order`, "
             "MAX(class) AS class, MAX(phylum) AS phylum, MAX(kingdom) AS kingdom "
             "FROM conapesca_landings_historical "
-            "WHERE nombre_cientifico IS NOT NULL "
-            "AND TRIM(nombre_cientifico) != '' "
-            "AND UPPER(TRIM(nombre_cientifico)) != 'ND' "
-            "GROUP BY nombre_cientifico",
+            "WHERE nombre_cientifico_canonico IS NOT NULL "
+            "AND TRIM(nombre_cientifico_canonico) != '' "
+            "AND UPPER(TRIM(nombre_cientifico_canonico)) != 'ND' "
+            "GROUP BY nombre_cientifico_canonico",
             max_rows=5000,
         )
 
@@ -125,7 +130,7 @@ def register(mcp) -> None:
             "order": [], "class": [], "phylum": [], "kingdom": [], "unclassified": [],
         }
         for row in identified_rows:
-            nc = (row.get("nombre_cientifico") or "").strip()
+            nc = (row.get("nombre_cientifico_canonico") or "").strip()
             if not nc:
                 continue
             if " " in nc:
@@ -153,18 +158,18 @@ def register(mcp) -> None:
         nd_rows = execute_select(
             "SELECT DISTINCT nombre_especie "
             "FROM conapesca_landings_historical "
-            "WHERE nombre_cientifico IS NULL "
-            "OR TRIM(nombre_cientifico) = '' "
-            "OR UPPER(TRIM(nombre_cientifico)) = 'ND'",
+            "WHERE nombre_cientifico_canonico IS NULL "
+            "OR TRIM(nombre_cientifico_canonico) = '' "
+            "OR UPPER(TRIM(nombre_cientifico_canonico)) = 'ND'",
             max_rows=5000,
         )
         nd_especies = sorted(r["nombre_especie"] for r in nd_rows if r.get("nombre_especie"))
 
         nd_record_rows = execute_select(
             "SELECT COUNT(*) AS n FROM conapesca_landings_historical "
-            "WHERE nombre_cientifico IS NULL "
-            "OR TRIM(nombre_cientifico) = '' "
-            "OR UPPER(TRIM(nombre_cientifico)) = 'ND'"
+            "WHERE nombre_cientifico_canonico IS NULL "
+            "OR TRIM(nombre_cientifico_canonico) = '' "
+            "OR UPPER(TRIM(nombre_cientifico_canonico)) = 'ND'"
         )
         nd_records = nd_record_rows[0]["n"] if nd_record_rows else 0
 
@@ -172,13 +177,13 @@ def register(mcp) -> None:
 
         return _json({
             "summary": {
-                "total_unique_nombre_cientifico": total,
+                "total_unique_nombre_cientifico_canonico": total,
                 "by_taxonomic_level": {k: len(v) for k, v in levels.items() if v},
             },
             "by_level": {k: sorted(v) for k, v in levels.items() if v},
             "unidentified": {
                 "note": (
-                    "These nombre_especie values have nombre_cientifico = ND or empty "
+                    "These nombre_especie values have nombre_cientifico_canonico = ND or empty "
                     "and are not yet taxonomically identified."
                 ),
                 "n_unique_nombre_especie": len(nd_especies),
@@ -428,7 +433,7 @@ def register(mcp) -> None:
             p, max_rows=safe_limit,
         )
         return _json({
-            "landings": [{**dict(r), "tipo": _tipo(r.get("nombre_cientifico"))} for r in rows],
+            "landings": [{**dict(r), "tipo": _tipo(r.get("nombre_cientifico_canonico"))} for r in rows],
             "meta": {
                 "filters": active_filters,
                 "row_count": len(rows),
@@ -465,18 +470,43 @@ def register(mcp) -> None:
         """
         Return the taxonomic classification for a species name
         (kingdom → genus) plus FishBase traits if available.
+        Searches nombre_cientifico_canonico first; falls back to nombre_especie
+        if no results are found.
         """
-        rows = execute_select(
-            "SELECT DISTINCT nombre_especie, nombre_cientifico, "
-            "kingdom, phylum, class, `order`, family, genus, worms_id, "
-            "spec_code_fishbase, fishbase_database, "
-            "k, loo, lmax, tmax, wmax, trophic_level, tipo_pesca_canonico "
+        _q = f"%{especie.upper()}%"
+        _base = (
+            "SELECT nombre_cientifico_canonico, "
+            "GROUP_CONCAT(DISTINCT nombre_especie) AS nombres_especie_conapesca, "
+            "MAX(kingdom) AS kingdom, MAX(phylum) AS phylum, "
+            "MAX(class) AS class, MAX(`order`) AS `order`, "
+            "MAX(family) AS family, MAX(genus) AS genus, "
+            "MAX(worms_id) AS worms_id, "
+            "MAX(spec_code_fishbase) AS spec_code_fishbase, "
+            "MAX(fishbase_database) AS fishbase_database, "
+            "MAX(k) AS k, MAX(loo) AS loo, MAX(lmax) AS lmax, "
+            "MAX(tmax) AS tmax, MAX(wmax) AS wmax, "
+            "MAX(trophic_level) AS trophic_level, "
+            "MAX(tipo_pesca_canonico) AS tipo_pesca_canonico "
             "FROM conapesca_landings_historical "
-            "WHERE nombre_especie LIKE ? OR nombre_cientifico LIKE ? "
-            "LIMIT 10",
-            (f"%{especie.upper()}%", f"%{especie.upper()}%"),
+            "WHERE {where} "
+            "GROUP BY nombre_cientifico_canonico "
+            "ORDER BY nombre_cientifico_canonico "
+            "LIMIT 10"
         )
+        rows = execute_select(
+            _base.format(where="nombre_cientifico_canonico LIKE ?"), (_q,)
+        )
+        fallback_used = False
+        if not rows:
+            rows = execute_select(
+                _base.format(where="nombre_especie LIKE ?"), (_q,)
+            )
+            fallback_used = True
         return _json({
             "taxonomy": [dict(r) for r in rows],
-            "meta": {"query": especie, "count": len(rows)},
+            "meta": {
+                "query": especie,
+                "count": len(rows),
+                "search_field": "nombre_especie" if fallback_used else "nombre_cientifico_canonico",
+            },
         })
