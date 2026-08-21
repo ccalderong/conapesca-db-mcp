@@ -5,13 +5,15 @@ Auto-discovers tool modules from tools/.
 
 from __future__ import annotations
 import importlib
+import importlib.metadata
 import json
 import pkgutil
 import logging
 
 from fastmcp import FastMCP
-from mcp_server.db import test_connection
+from mcp_server.db import test_connection, get_db_version_log
 from mcp_server.schema import build_schema_snapshot
+from mcp_server.config import MCP_VERSION, TESTED_DB_VERSION
 
 logger = logging.getLogger("conapesca_mcp.server")
 
@@ -28,6 +30,26 @@ def health_check() -> str:
         return json.dumps({"status": "ok", "db": info})
     except Exception as e:
         return json.dumps({"status": "error", "detail": str(e)})
+
+
+@mcp.tool()
+def get_version() -> str:
+    """Return MCP server version and DB version history from db_version_log."""
+    try:
+        rows = get_db_version_log()
+        # Latest entry per table
+        latest_per_table: dict = {}
+        for row in rows:
+            tbl = row.get("table_name")
+            if tbl not in latest_per_table:
+                latest_per_table[tbl] = row
+        return json.dumps({
+            "mcp_version": MCP_VERSION,
+            "tested_db_version": TESTED_DB_VERSION,
+            "db": latest_per_table,
+        }, ensure_ascii=False, default=str)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 @mcp.tool()
@@ -72,8 +94,8 @@ def data_dictionary() -> str:
 
 ## Geography
 - nombre_estado                    : Mexican state
-- clave_oficina / nombre_oficina_canonico : CONAPESCA office
-- clave_sitio_desembarque / nombre_sitio_desembarque_canonico : Landing site
+- clave_oficina / nombre_oficina : CONAPESCA office
+- clave_sitio_desembarque / nombre_sitio_desembarque : Landing site
 - nombre_lugar_captura             : Capture area
 
 ## Species
@@ -97,8 +119,15 @@ def data_dictionary() -> str:
 - valor_pesos_estimado  : Estimated value (MXN) — uses valor_pesos if available,
                           else peso_desembarcado_kg × precio_pesos
 
+## Effort flags (v0.0.3+)
+- dias_efectivos_fuente              : Source column used for dias_efectivos
+- flag_fecha_generica                : 1 if fecha_aviso was imputed (not reported)
+- flag_periodo_futuro                : 1 if periodo_fin > fecha_aviso (data error)
+- flag_dias_efectivos_sospechoso     : 1 if dias_efectivos is implausibly large
+- flag_periodos_invertidos           : 1 if periodo_inicio > periodo_fin
+- flag_anio_corregido                : 1 if anio_corte was corrected from source
+
 ## Enrichment flags
-- manglar            : Mangrove-associated species (SI/NO)
 - tipo_pesca_canonico: ARTESANAL / INDUSTRIAL / ALTURA
 """
 
@@ -111,7 +140,8 @@ def coverage_info() -> str:
 
 ## Temporal
 - Years: 2001–2026 (fiscal year of landing)
-- Source: AWS MariaDB historical table (conapesca_landings_historical)
+- Source: AWS RDS table (conapesca_landings_historical)
+- Current version: v0.0.3 (2026-07-31) — ~12,750,506 rows, 70 columns
 
 ## Geographic
 - All Mexican coasts (Pacific + Gulf + Caribbean)
